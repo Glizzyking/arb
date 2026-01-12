@@ -1,0 +1,8 @@
+{
+    "track_id": "calculators_20260112",
+    "type": "feature",
+    "status": "new",
+    "created_at": "2026-01-12T01:31:00Z",
+    "updated_at": "2026-01-12T01:31:00Z",
+    "description": "Add 5 prediction market calculation tools (Arbitrage, Odds Conversion, EV, Kelly Criterion) from defirate.com to the Calculators page."
+}

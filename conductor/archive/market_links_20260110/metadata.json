@@ -1,0 +1,8 @@
+{
+    "track_id": "market_links_20260110",
+    "type": "feature",
+    "status": "new",
+    "created_at": "2026-01-10T19:17:29Z",
+    "updated_at": "2026-01-10T19:17:29Z",
+    "description": "Add clickable external link icons next to Polymarket slug and Kalshi ticker"
+}

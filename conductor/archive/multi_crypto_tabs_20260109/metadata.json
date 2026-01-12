@@ -1,0 +1,8 @@
+{
+    "track_id": "multi_crypto_tabs_20260109",
+    "type": "feature",
+    "status": "new",
+    "created_at": "2026-01-09T04:29:00Z",
+    "updated_at": "2026-01-09T04:29:00Z",
+    "description": "Add multi-cryptocurrency tab support with BTC, ETH, XRP, SOL preset tabs and custom token addition via + button"
+}
