@@ -31,6 +31,7 @@ interface Position {
     id: string
     calendar_date: string
     expiration_hour: string
+    asset: string
     status: string
     position_legs: PositionLeg[]
 }
@@ -244,7 +245,7 @@ export function TrackerPage({ user, onRequireAuth }: TrackerPageProps) {
                                                     "text-[10px] px-1.5 py-0.5 rounded truncate font-medium",
                                                     pos.status === 'pending' ? "bg-white/5 text-white/60" : "bg-green-500/10 text-green-400"
                                                 )}>
-                                                    {pos.expiration_hour} • {pos.status.replace('_won', '').replace('both_', 'L')}
+                                                    {pos.asset} • {pos.expiration_hour} • {pos.status.replace('_won', '').replace('both_', 'L')}
                                                 </div>
                                             ))}
                                             {dayPositions.length > 2 && (
@@ -290,6 +291,7 @@ export function TrackerPage({ user, onRequireAuth }: TrackerPageProps) {
                                             <CardContent className="p-4">
                                                 <div className="flex justify-between items-center mb-4">
                                                     <div className="flex items-center gap-2">
+                                                        <span className="text-xs font-black text-white bg-white/10 px-2 py-1 rounded uppercase">{pos.asset}</span>
                                                         <span className="text-xs font-black text-blue-400 bg-blue-400/10 px-2 py-1 rounded uppercase">{pos.expiration_hour}</span>
                                                         {pos.status !== 'pending' && (
                                                             <span className={cn(

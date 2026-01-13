@@ -467,8 +467,12 @@ function Dashboard() {
                   </CardHeader>
                   <CardContent>
                     <div className="space-y-5">
-                      <div className="bg-white/5 border border-white/5 p-3 rounded-xl">
-                        <div className="text-[10px] text-white/30 uppercase tracking-[0.2em] font-black text-center">Prediction Venue</div>
+                      <div className="bg-gradient-to-r from-blue-500/10 to-indigo-500/10 border border-blue-500/20 p-4 rounded-xl">
+                        <div className="text-[10px] text-blue-400/60 uppercase tracking-[0.2em] font-black text-center mb-1">Price to Beat (Hourly Open)</div>
+                        <div className="text-2xl font-mono font-bold text-white text-center">
+                          ${data.polymarket?.price_to_beat?.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 }) || 'Loading...'}
+                        </div>
+                        <div className="text-[10px] text-white/30 text-center mt-1">Source: Binance.US</div>
                       </div>
 
                       <div className="space-y-4">
@@ -544,8 +548,18 @@ function Dashboard() {
             {/* Arbitrage Checks Table */}
             <Card className="bg-zinc-950 border-white/5">
               <CardHeader>
-                <CardTitle className="text-white">Arbitrage Analysis Matrix</CardTitle>
-                <CardDescription className="text-white/40 font-medium">Cross-market strategy evaluation</CardDescription>
+                <div className="flex justify-between items-start">
+                  <div>
+                    <CardTitle className="text-white">Arbitrage Analysis Matrix</CardTitle>
+                    <CardDescription className="text-white/40 font-medium">Cross-market strategy evaluation</CardDescription>
+                  </div>
+                  <div className="bg-blue-500/10 border border-blue-500/20 px-4 py-2 rounded-xl text-right">
+                    <div className="text-[10px] text-blue-400/60 uppercase tracking-widest font-black">Polymarket Strike</div>
+                    <div className="text-lg font-mono font-bold text-white">
+                      ${data.polymarket?.price_to_beat?.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 }) || '—'}
+                    </div>
+                  </div>
+                </div>
               </CardHeader>
               <CardContent>
                 <div className="overflow-x-auto">

@@ -4,10 +4,18 @@
 
 ---
 
-## [x] Track: Main Navigation and Settings Panel
-*Link: [./conductor/tracks/navigation_20260110/](./conductor/tracks/navigation_20260110/)*
+## Active Tracks
+- No active tracks.
 
 ---
 
-## [x] Track: Calendar-based Arbitrage Tracker with Supabase
-*Link: [./conductor/tracks/tracker_20260111/](./conductor/tracks/tracker_20260111/)*
+## Archive (Completed)
+
+### [x] Track: Position Tracking Enhancements (Coin & Expiration)
+*Link: [./conductor/archive/position_enhancements_20260113/](./conductor/archive/position_enhancements_20260113/)*
+
+### [x] Track: Calendar-based Arbitrage Tracker with Supabase
+*Link: [./conductor/archive/tracker_20260111/](./conductor/archive/tracker_20260111/)*
+
+### [x] Track: Professional Market Intelligence Suite (Calculators)
+*Link: [./conductor/archive/calculators_20260111/](./conductor/archive/calculators_20260111/)*

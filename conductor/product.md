@@ -13,6 +13,7 @@ The **Polymarket-Kalshi Crypto Arbitrage Bot** is a tool designed to monitor and
 |-------|-------------|
 | **Backend** | Python 3.9+, FastAPI, Uvicorn, Requests, Pytz |
 | **Frontend** | Next.js 16, React 19, TypeScript 5, Tailwind CSS 4 |
+| **Database** | Supabase (PostgreSQL) |
 | **UI Components** | shadcn/ui (Radix UI primitives), Lucide React |
 | **APIs** | Polymarket CLOB API, Kalshi Trade API |
 
@@ -31,15 +32,8 @@ The **Polymarket-Kalshi Crypto Arbitrage Bot** is a tool designed to monitor and
 - **[NEW] Settings Panel** for API Key management (Polymarket and Kalshi)
 - **[NEW] Dark Theme Dashboard** with premium UI elements and backdrop effects
 
-### Existing User Request
-User wants to extend the bot to support:
-1. Multiple cryptocurrencies (BTC, ETH, XRP, SOL) [COMPLETED]
-2. Tabbed navigation UI [COMPLETED]
-3. Custom token addition via "+" button with manual Polymarket/Kalshi target input [COMPLETED]
-4. **Professional Market Intelligence Suite** with 5 integrated calculators: [COMPLETED]
-   - Odds Converter & Implied Probability
-   - Arbitrage ROI & Fee Calculator
-   - Multi-Market Value Comparison
-   - Expected Value (EV) & Breakeven Analysis
-   - Kelly Criterion Risk/Position Sizer
+6. **Arbitrage Tracker Enhancements**: [COMPLETED]
+   - Coin selection (BTC, ETH, XRP, SOL) for position logging.
+   - Auto-calculated hourly expiration defaults.
+   - Enhanced UI with asset symbols and expiration tracking.
 

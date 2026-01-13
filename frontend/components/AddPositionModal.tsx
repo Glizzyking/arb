@@ -13,9 +13,17 @@ interface AddPositionModalProps {
 }
 
 export function AddPositionModal({ isOpen, onClose, onSuccess, selectedDate }: AddPositionModalProps) {
+    const getNextFullHour = () => {
+        const now = new Date()
+        const nextHour = new Date(now.getTime() + 60 * 60 * 1000)
+        nextHour.setMinutes(0, 0, 0)
+        return format(nextHour, "HH:mm")
+    }
+
     const [loading, setLoading] = useState(false)
     const [error, setError] = useState<string | null>(null)
-    const [expirationHour, setExpirationHour] = useState("14:00") // Default 2 PM
+    const [expirationHour, setExpirationHour] = useState(getNextFullHour())
+    const [asset, setAsset] = useState("BTC")
 
     const [polyPrice, setPolyPrice] = useState("")
     const [polyContracts, setPolyContracts] = useState("")
@@ -41,6 +49,7 @@ export function AddPositionModal({ isOpen, onClose, onSuccess, selectedDate }: A
                     user_id: user.id,
                     calendar_date: format(selectedDate, 'yyyy-MM-dd'),
                     expiration_hour: expirationHour,
+                    asset: asset,
                     status: 'pending'
                 })
                 .select()
@@ -196,6 +205,20 @@ export function AddPositionModal({ isOpen, onClose, onSuccess, selectedDate }: A
                                 </div>
                             </div>
                         </div>
+                    </div>
+                    {/* Asset Selection */}
+                    <div className="space-y-2">
+                        <label className="text-xs font-bold text-white/20 uppercase tracking-widest ml-1">Trading Asset</label>
+                        <select
+                            value={asset}
+                            onChange={(e) => setAsset(e.target.value)}
+                            className="w-full bg-white/5 border border-white/5 rounded-2xl p-4 text-sm text-white focus:outline-none focus:border-blue-500/50 transition-all font-bold appearance-none cursor-pointer"
+                        >
+                            <option value="BTC" className="bg-zinc-950 text-white">Bitcoin (BTC)</option>
+                            <option value="ETH" className="bg-zinc-950 text-white">Ethereum (ETH)</option>
+                            <option value="XRP" className="bg-zinc-950 text-white">XRP</option>
+                            <option value="SOL" className="bg-zinc-950 text-white">Solana (SOL)</option>
+                        </select>
                     </div>
 
                     <button

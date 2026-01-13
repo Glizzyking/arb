@@ -41,33 +41,36 @@ class PriceFetcher:
     def __init__(self):
         self.session = requests.Session()
         self.session.headers.update({
-            "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36"
+            "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+            "Accept": "application/json",
+            "Origin": "https://polymarket.com",
+            "Referer": "https://polymarket.com/"
         })
         
         # Cache to avoid repeated fetches within the same hour
         self._cache: Dict[str, PriceResult] = {}
         self._last_hour = -1
         
-        # Asset to Binance.US symbol mapping
+        # Asset to Binance International symbol mapping (USDT pairs match Polymarket resolution)
         self.binance_symbols = {
-            "BTC": "BTCUSD",
-            "ETH": "ETHUSD",
-            "XRP": "XRPUSD",
-            "SOL": "SOLUSD",
+            "BTC": "BTCUSDT",
+            "ETH": "ETHUSDT",
+            "XRP": "XRPUSDT",
+            "SOL": "SOLUSDT",
         }
     
     def get_price_to_beat(self, asset: str, market_slug: Optional[str] = None) -> PriceResult:
         """
-        Get the "Price to Beat" for an asset.
+        Get the "Price to Beat" for an asset with multi-source fallback.
         
-        Args:
-            asset: Asset code (BTC, ETH, XRP, SOL)
-            market_slug: Optional Polymarket slug (reserved for future scraping)
-            
-        Returns:
-            PriceResult with price, source, and metadata
+        Order of attempt:
+        1. Polymarket Data API (Internal)
+        2. Binance International API (Resolution Source)
+        3. CryptoCompare API (Reliable Fallback)
         """
-        current_hour = datetime.datetime.now().hour
+        current_hour_dt = datetime.datetime.now().replace(minute=0, second=0, microsecond=0)
+        current_hour = current_hour_dt.hour
+        timestamp = int(current_hour_dt.timestamp())
         
         # Clear cache if hour changed
         if current_hour != self._last_hour:
@@ -78,16 +81,26 @@ class PriceFetcher:
         if asset in self._cache:
             return self._cache[asset]
         
-        # NOTE: Polymarket renders "Price to Beat" via client-side JavaScript
-        # Static HTML scraping doesn't reliably find it, so we use Binance.US directly
-        # This is actually the same source Polymarket uses for resolution anyway.
+        price = 0.0
+        source = "unknown"
         
-        # Primary source: Binance.US
-        price = self._fetch_binance_us(asset)
-        source = "binance_us"
+        # 1. Try Polymarket Data API (As requested by user)
+        price = self._fetch_polymarket_data_api(asset, timestamp)
+        if price > 0:
+            source = "polymarket_data_api"
+        else:
+            # 2. Try Binance International (Official Resolution Source)
+            price = self._fetch_binance_intl(asset)
+            if price > 0:
+                source = "binance_intl"
+            else:
+                # 3. Try CryptoCompare (Mirror of Binance, works in restricted regions)
+                price = self._fetch_cryptocompare(asset)
+                if price > 0:
+                    source = "cryptocompare_binance"
         
         if price <= 0:
-            logger.warning(f"[{asset}] Failed to get price from Binance.US")
+            logger.error(f"[{asset}] FAILED to fetch Price to Beat from ALL sources")
         
         result = PriceResult(
             price=price,
@@ -101,34 +114,56 @@ class PriceFetcher:
         self._cache[asset] = result
         return result
     
-    def _fetch_binance_us(self, asset: str) -> float:
-        """
-        Fetch the current hour's open price from Binance.US
-        
-        This is the reliable source since Binance.US (specifically BTC/USDT) is the
-        resolution source for Polymarket hourly markets.
-        """
-        symbol = self.binance_symbols.get(asset, "BTCUSD")
-        
+    def _fetch_polymarket_data_api(self, asset: str, timestamp: int) -> float:
+        """Fetch price directly from Polymarket's internal data API"""
+        symbol = self.binance_symbols.get(asset, "BTCUSDT")
         try:
-            url = "https://api.binance.us/api/v3/klines"
-            params = {
-                "symbol": symbol,
-                "interval": "1h",
-                "limit": 1
-            }
-            
+            # Note: This is an internal API discovered via web scraping
+            url = f"https://data-api.polymarket.com/price?symbol={symbol}&timestamp={timestamp}"
+            response = self.session.get(url, timeout=5)
+            if response.status_code == 200:
+                data = response.json()
+                # Assuming the format is a float or a dict with price
+                if isinstance(data, (int, float)):
+                    return float(data)
+                elif isinstance(data, dict) and "price" in data:
+                    return float(data["price"])
+        except Exception as e:
+            logger.debug(f"Polymarket Data API unavailable: {e}")
+        return 0.0
+
+    def _fetch_binance_intl(self, asset: str) -> float:
+        """Fetch the current hour's open price from Binance International"""
+        symbol = self.binance_symbols.get(asset, "BTCUSDT")
+        try:
+            url = "https://api.binance.com/api/v3/klines"
+            params = {"symbol": symbol, "interval": "1h", "limit": 1}
             response = self.session.get(url, params=params, timeout=5)
-            
             if response.status_code == 200:
                 data = response.json()
                 if data and len(data) > 0:
-                    # Kline format: [open_time, open, high, low, close, ...]
-                    return float(data[0][1])
-                    
+                    return float(data[0][1]) # Open price
         except Exception as e:
-            logger.error(f"Binance.US API error for {asset}: {e}")
-        
+            logger.debug(f"Binance International API error: {e}")
+        return 0.0
+
+    def _fetch_cryptocompare(self, asset: str) -> float:
+        """Fetch Binance-specific price from CryptoCompare (fallback)"""
+        try:
+            # Maps BTC to BTCUSDT on Binance
+            symbol = "BTC" if asset == "BTC" else asset
+            # Use USDT as target symbol to match Binance International trading pairs
+            url = f"https://min-api.cryptocompare.com/data/v2/histohour?fsym={symbol}&tsym=USDT&limit=1&e=Binance"
+            response = self.session.get(url, timeout=5)
+            if response.status_code == 200:
+                data = response.json()
+                if data.get("Response") == "Success":
+                    points = data.get("Data", {}).get("Data", [])
+                    if points:
+                        # Return the open price of the current hour (last entry)
+                        return float(points[-1].get("open", 0))
+        except Exception as e:
+            logger.debug(f"CryptoCompare fallback error: {e}")
         return 0.0
     
     def refresh_all(self) -> Dict[str, PriceResult]:
