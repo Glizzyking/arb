@@ -24,13 +24,51 @@ class KalshiClient:
     def __init__(self):
         self.base_url = KALSHI_API_BASE
         self.session = requests.Session()
-        self.session.headers.update({
-            "Accept": "application/json",
-            "User-Agent": "CryptoArbTracker/1.0"
-        })
+        self.user_agents = [
+            "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+            "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/119.0.0.0 Safari/537.36",
+            "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+            "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:109.0) Gecko/20100101 Firefox/121.0"
+        ]
+        self._set_random_headers()
         # Discovery cache to avoid constant market querying
         self._discovery_cache = {}
         self._cache_ttl = 300 # 5 minutes
+
+    def _set_random_headers(self):
+        import random
+        self.session.headers.update({
+            "Accept": "application/json",
+            "User-Agent": random.choice(self.user_agents),
+            "Referer": "https://kalshi.com/",
+            "Origin": "https://kalshi.com"
+        })
+
+    def _request_with_retry(self, method, url, **kwargs):
+        """Request wrapper with exponential backoff for 429s"""
+        import random
+        max_retries = 5
+        base_delay = 1.0 # seconds
+        
+        for i in range(max_retries):
+            try:
+                # Rotate headers on each retry for better evasion
+                if i > 0: self._set_random_headers()
+                
+                response = self.session.request(method, url, **kwargs)
+                
+                if response.status_code == 429:
+                    delay = (base_delay * (2 ** i)) + (random.random() * 0.5)
+                    print(f"⚠️ Kalshi 429 Rate Limit. Retrying in {delay:.2f}s... (Attempt {i+1}/{max_retries})")
+                    time.sleep(delay)
+                    continue
+                
+                return response
+            except Exception as e:
+                if i == max_retries - 1: raise e
+                time.sleep(base_delay * (2 ** i))
+        
+        return None
     
     def get_market(self, ticker: str) -> Optional[Dict[str, Any]]:
         """
@@ -45,8 +83,8 @@ class KalshiClient:
         url = f"{self.base_url}/markets/{ticker}"
         
         try:
-            response = self.session.get(url, timeout=10)
-            if response.status_code == 200:
+            response = self._request_with_retry("GET", url, timeout=10)
+            if response and response.status_code == 200:
                 return response.json().get("market")
             elif response.status_code == 404:
                 return None
@@ -70,8 +108,8 @@ class KalshiClient:
         url = f"{self.base_url}/events/{event_ticker}"
         
         try:
-            response = self.session.get(url, timeout=10)
-            if response.status_code == 200:
+            response = self._request_with_retry("GET", url, timeout=10)
+            if response and response.status_code == 200:
                 return response.json()
             elif response.status_code == 404:
                 return None
@@ -97,8 +135,8 @@ class KalshiClient:
         }
         
         try:
-            response = self.session.get(url, params=params, timeout=10)
-            if response.status_code == 200:
+            response = self._request_with_retry("GET", url, params=params, timeout=10)
+            if response and response.status_code == 200:
                 markets = response.json().get("markets", [])
                 if status:
                     markets = [m for m in markets if m.get("status") in status]
@@ -123,8 +161,8 @@ class KalshiClient:
         params = {"event_ticker": event_ticker}
         
         try:
-            response = self.session.get(url, params=params, timeout=10)
-            if response.status_code == 200:
+            response = self._request_with_retry("GET", url, params=params, timeout=10)
+            if response and response.status_code == 200:
                 markets = response.json().get("markets", [])
                 self._discovery_cache[event_ticker] = (now, markets)
                 return markets
@@ -143,8 +181,8 @@ class KalshiClient:
         url = f"{self.base_url}/markets/{ticker}/orderbook"
         
         try:
-            response = self.session.get(url, timeout=10)
-            if response.status_code == 200:
+            response = self._request_with_retry("GET", url, timeout=10)
+            if response and response.status_code == 200:
                 return response.json().get("orderbook")
             return None
         except Exception as e:
@@ -309,49 +347,64 @@ class PolymarketClient:
             print(f"Polymarket markets request failed: {e}")
             return []
     
-    def search_crypto_events(
-        self, 
-        crypto_slug_prefix: str, 
-        active_only: bool = True
-    ) -> List[Dict[str, Any]]:
+    def find_ladder_events(self, asset: str) -> List[Dict[str, Any]]:
         """
-        Search for all crypto hourly events matching prefix.
-        
-        Args:
-            crypto_slug_prefix: Like "bitcoin-up-or-down"
-            active_only: Only return active (not closed) events
-        
-        Returns:
-            List of matching event dicts
+        Find active ladder events for an asset (e.g. BTC, ETH).
+        Search for titles like 'Bitcoin above ___' or 'What will the price of Bitcoin be'.
         """
+        # 1. Search for asset name
         url = f"{self.gamma_url}/events"
-        params = {
-            "limit": 100,
-            "active": "true" if active_only else "false"
-        }
+        params = {"limit": 100, "active": "true", "q": asset}
         
         try:
             response = self.session.get(url, params=params, timeout=10)
             if response.status_code == 200:
                 events = response.json() or []
-                # Filter by slug prefix
-                return [
-                    e for e in events 
-                    if e.get("slug", "").startswith(crypto_slug_prefix)
-                ]
+                # Filter for ladder-like titles
+                ladder_events = []
+                for e in events:
+                    title = e.get("title", "").lower()
+                    slug = e.get("slug", "").lower()
+                    # Look for "above", "hit", or "price of"
+                    if any(x in title or x in slug for x in ["above", "hit", "price of"]):
+                        ladder_events.append(e)
+                return ladder_events
             return []
         except Exception as e:
-            print(f"Polymarket search request failed: {e}")
+            print(f"Polymarket ladder search failed: {e}")
+            return []
+
+    def get_market_matching_strike(self, event_id: str, target_strike: float) -> Optional[Dict[str, Any]]:
+        """
+        Find a specific market within a ladder event that matches a strike.
+        """
+        url = f"{self.gamma_url}/markets"
+        params = {"event_id": event_id}
+        
+        try:
+            response = self.session.get(url, params=params, timeout=10)
+            if response.status_code == 200:
+                markets = response.json() or []
+                for m in markets:
+                    question = m.get("question", "")
+                    # Extract number from question like "Bitcoin above $95,000?"
+                    import re
+                    match = re.search(r'\$(\d{1,3}(?:,\d{3})*)', question)
+                    if match:
+                        strike_val = float(match.group(1).replace(',', ''))
+                        if abs(strike_val - target_strike) < 0.1:
+                            return m
+            return None
+        except Exception as e:
+            print(f"Polymarket strike match failed: {e}")
             return []
     
     def get_market_prices(self, slug: str) -> Optional[Dict[str, Any]]:
         """
-        Get current prices for a market by slug.
-        
-        For binary up/down markets, returns Up and Down prices.
+        Get current prices and depth for a market by slug using both Gamma and CLOB APIs.
         
         Returns:
-            Dict with outcome prices and volumes
+        Dict with outcome prices (bid/ask) and real liquidity depth.
         """
         markets = self.get_markets_by_event_slug(slug)
         
@@ -361,32 +414,92 @@ class PolymarketClient:
         results = {
             "outcomes": {},
             "total_volume": 0,
-            "liquidity": 0
+            "liquidity": 0,
+            "clob_active": False
         }
         
         for market in markets:
-            outcome_prices = market.get("outcomePrices", "")
-            
-            # Parse outcome prices (stored as JSON string like '["0.52","0.48"]')
-            try:
-                if outcome_prices:
-                    prices = json.loads(outcome_prices) if isinstance(outcome_prices, str) else outcome_prices
-                    
-                    outcomes = market.get("outcomes", "")
-                    if outcomes:
-                        outcomes_list = json.loads(outcomes) if isinstance(outcomes, str) else outcomes
-                        
-                        for i, outcome in enumerate(outcomes_list):
-                            if i < len(prices):
-                                results["outcomes"][outcome] = float(prices[i])
-            except Exception as e:
-                print(f"Failed to parse prices for market {market.get('id')}: {e}")
-            
-            # Aggregate volume/liquidity
+            # 1. Basic metrics from Gamma
             results["total_volume"] += float(market.get("volume", 0) or 0)
             results["liquidity"] += float(market.get("liquidity", 0) or 0)
+            results["raw_market"] = market
+            
+            # 2. Extract outcome info
+            try:
+                outcomes_list = json.loads(market.get("outcomes", "[]")) if isinstance(market.get("outcomes"), str) else market.get("outcomes", [])
+                clob_token_ids = json.loads(market.get("clobTokenIds", "[]")) if isinstance(market.get("clobTokenIds"), str) else market.get("clobTokenIds", [])
+                
+                # Fetch CLOB orderbook for each outcome if available
+                for i, (outcome, token_id) in enumerate(zip(outcomes_list, clob_token_ids)):
+                    clob_data = self.get_clob_orderbook(token_id)
+                    if clob_data:
+                        results["clob_active"] = True
+                        results["outcomes"][outcome] = {
+                            "bid": clob_data.get("bid"),
+                            "ask": clob_data.get("ask"),
+                            "bid_count": clob_data.get("bid_count"),
+                            "ask_count": clob_data.get("ask_count"),
+                            "mid": (clob_data.get("bid") + clob_data.get("ask")) / 2 if clob_data.get("bid") and clob_data.get("ask") else None
+                        }
+                    else:
+                        # Fallback to Gamma prices if CLOB fails
+                        outcome_prices = market.get("outcomePrices", [])
+                        if isinstance(outcome_prices, str):
+                            outcome_prices = json.loads(outcome_prices)
+                        
+                        price = float(outcome_prices[i]) if i < len(outcome_prices) else 0
+                        results["outcomes"][outcome] = {
+                            "bid": price, # Approximate
+                            "ask": price, # Approximate
+                            "bid_count": int(results["liquidity"] / (price or 1)) / 10,
+                            "ask_count": int(results["liquidity"] / (price or 1)) / 10,
+                            "mid": price
+                        }
+            except Exception as e:
+                print(f"Failed to process CLOB/Gamma for market {market.get('id')}: {e}")
         
         return results if results["outcomes"] else None
+
+    def get_clob_orderbook(self, token_id: str) -> Optional[Dict[str, Any]]:
+        """
+        Fetch the top of the book for a specific token from CLOB API.
+        """
+        if not token_id:
+            return None
+            
+        url = f"{self.clob_url}/book"
+        params = {"token_id": token_id}
+        
+        try:
+            response = self.session.get(url, params=params, timeout=5)
+            if response.status_code == 200:
+                data = response.json()
+                bids = data.get("bids", [])
+                asks = data.get("asks", [])
+                
+                # CRITICAL: Sort bids descending (highest first), asks ascending (lowest first)
+                sorted_bids = sorted(bids, key=lambda x: float(x["price"]), reverse=True)
+                sorted_asks = sorted(asks, key=lambda x: float(x["price"]), reverse=False)
+                
+                # Extract best bid (highest) and best ask (lowest)
+                best_bid = float(sorted_bids[0]["price"]) if sorted_bids else None
+                bid_qty = float(sorted_bids[0]["size"]) if sorted_bids else 0
+                
+                best_ask = float(sorted_asks[0]["price"]) if sorted_asks else None
+                ask_qty = float(sorted_asks[0]["size"]) if sorted_asks else 0
+                
+                return {
+                    "bid": best_bid,
+                    "ask": best_ask,
+                    "bid_count": int(bid_qty),
+                    "ask_count": int(ask_qty)
+                }
+            return None
+        except Exception as e:
+            print(f"Polymarket CLOB book request failed for {token_id}: {e}")
+            return None
+
+
 
 
 class CombinedMarketFetcher:
@@ -449,6 +562,8 @@ class CombinedMarketFetcher:
                 "yes_ask": float(best_market.get("yes_ask_dollars", "0") or "0"),
                 "no_bid": float(best_market.get("no_bid_dollars", "0") or "0"),
                 "no_ask": float(best_market.get("no_ask_dollars", "0") or "0"),
+                "yes_ask_count": int(best_market.get("yes_ask_quantity", 0)), # LIQUIDITY DEPTH
+                "no_ask_count": int(best_market.get("no_ask_quantity", 0)),   # LIQUIDITY DEPTH
                 "status": best_market.get("status"),
                 "volume_24h": float(best_market.get("volume_24h", 0) or 0),
                 "strike": float(best_market.get("floor_strike", 0) or 0),
@@ -463,6 +578,8 @@ class CombinedMarketFetcher:
                 "yes_ask": kalshi_data["yes_ask"],
                 "no_bid": kalshi_data["no_bid"],
                 "no_ask": kalshi_data["no_ask"],
+                "yes_count": kalshi_data["yes_ask_count"],
+                "no_count": kalshi_data["no_ask_count"],
                 "status": kalshi_data.get("status"),
                 "volume_24h": kalshi_data.get("volume_24h", 0),
                 "strike": kalshi_data.get("strike"),
@@ -474,15 +591,24 @@ class CombinedMarketFetcher:
         poly_data = self.polymarket.get_market_prices(polymarket_slug)
         if poly_data:
             # Map Up/Down to Yes/No
-            up_price = poly_data["outcomes"].get("Up", poly_data["outcomes"].get("Yes", 0))
-            down_price = poly_data["outcomes"].get("Down", poly_data["outcomes"].get("No", 0))
+            up_data = poly_data["outcomes"].get("Up", poly_data["outcomes"].get("Yes", {}))
+            down_data = poly_data["outcomes"].get("Down", poly_data["outcomes"].get("No", {}))
+            
+            # Use real depth if available, fallback to 0
+            up_count = up_data.get("ask_count", 0) if isinstance(up_data, dict) else 0
+            down_count = down_data.get("ask_count", 0) if isinstance(down_data, dict) else 0
             
             result["polymarket"] = {
                 "slug": polymarket_slug,
-                "up_price": up_price,  # Equivalent to "Yes" on Kalshi
-                "down_price": down_price,  # Equivalent to "No" on Kalshi
+                "up_price_ask": up_data.get("ask") if isinstance(up_data, dict) else up_data,
+                "up_price_bid": up_data.get("bid") if isinstance(up_data, dict) else up_data,
+                "down_price_ask": down_data.get("ask") if isinstance(down_data, dict) else down_data,
+                "down_price_bid": down_data.get("bid") if isinstance(down_data, dict) else down_data,
+                "up_count": int(up_count),
+                "down_count": int(down_count),
                 "volume": poly_data["total_volume"],
-                "liquidity": poly_data["liquidity"]
+                "liquidity": poly_data["liquidity"],
+                "clob_active": poly_data.get("clob_active", False)
             }
         
         # Calculate arbitrage opportunities
@@ -491,6 +617,7 @@ class CombinedMarketFetcher:
                 result["kalshi"], 
                 result["polymarket"]
             )
+
         
         return result
 
@@ -512,8 +639,9 @@ class CombinedMarketFetcher:
         opportunities = []
         
         # Strategy 1: Buy YES on Kalshi, Buy DOWN (NO) on Polymarket
-        if kalshi["yes_ask"] > 0 and poly["down_price"] > 0:
-            total_cost = kalshi["yes_ask"] + poly["down_price"]
+        poly_down_ask = poly.get("down_price_ask", 0)
+        if kalshi["yes_ask"] > 0 and poly_down_ask > 0:
+            total_cost = kalshi["yes_ask"] + poly_down_ask
             if total_cost < 1.0:
                 profit_pct = ((1.0 - total_cost) / total_cost) * 100
                 opportunities.append({
@@ -521,15 +649,16 @@ class CombinedMarketFetcher:
                     "kalshi_side": "YES",
                     "kalshi_price": kalshi["yes_ask"],
                     "poly_side": "DOWN",
-                    "poly_price": poly["down_price"],
+                    "poly_price": poly_down_ask,
                     "total_cost": total_cost,
                     "profit_per_dollar": 1.0 - total_cost,
                     "profit_percent": profit_pct
                 })
         
         # Strategy 2: Buy NO on Kalshi, Buy UP (YES) on Polymarket
-        if kalshi["no_ask"] > 0 and poly["up_price"] > 0:
-            total_cost = kalshi["no_ask"] + poly["up_price"]
+        poly_up_ask = poly.get("up_price_ask", 0)
+        if kalshi["no_ask"] > 0 and poly_up_ask > 0:
+            total_cost = kalshi["no_ask"] + poly_up_ask
             if total_cost < 1.0:
                 profit_pct = ((1.0 - total_cost) / total_cost) * 100
                 opportunities.append({
@@ -537,11 +666,12 @@ class CombinedMarketFetcher:
                     "kalshi_side": "NO",
                     "kalshi_price": kalshi["no_ask"],
                     "poly_side": "UP",
-                    "poly_price": poly["up_price"],
+                    "poly_price": poly_up_ask,
                     "total_cost": total_cost,
                     "profit_per_dollar": 1.0 - total_cost,
                     "profit_percent": profit_pct
                 })
+
         
         best_opportunity = max(
             opportunities, 

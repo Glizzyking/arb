@@ -77,10 +77,28 @@ class PolymarketStream:
                             data = json.loads(message)
                             
                             if isinstance(data, dict):
-                                asset_id = data.get("asset_id")
-                                price = data.get("price")
-                                if asset_id and price:
-                                    self.prices[asset_id] = float(price)
+                                # The 'market' channel emits 'book' and 'price_change' events
+                                # 'price_change' has 'best_ask' and 'size'
+                                if data.get("event_type") == "price_change":
+                                    changes = data.get("price_changes", [])
+                                    for change in changes:
+                                        t_id = change.get("asset_id")
+                                        if t_id:
+                                            self.prices[t_id] = {
+                                                "ask": float(change.get("best_ask", 0)),
+                                                "bid": float(change.get("best_bid", 0)),
+                                                "size": float(change.get("size", 0))
+                                            }
+                                # Fallback/Initial for legacy/other events
+                                else:
+                                    asset_id = data.get("asset_id")
+                                    price = data.get("price")
+                                    if asset_id and price:
+                                        self.prices[asset_id] = {
+                                            "ask": float(price),
+                                            "bid": float(price),
+                                            "size": float(data.get("size", 0))
+                                        }
                         except asyncio.TimeoutError:
                             continue
                             
@@ -89,13 +107,14 @@ class PolymarketStream:
                 if self.is_running:
                     await asyncio.sleep(5)
     
-    def get_latest_prices(self, asset_code: str) -> Dict[str, float]:
+    def get_latest_prices(self, asset_code: str) -> Dict[str, Any]:
         """Map token prices back to outcomes for a specific asset"""
         results = {}
-        for t_id, price in self.prices.items():
+        for t_id, data in self.prices.items():
             outcome_info = self.token_to_outcome.get(t_id)
             if outcome_info and outcome_info[1] == asset_code:
-                results[outcome_info[0]] = price
+                # return the full data dict {ask, bid, size}
+                results[outcome_info[0]] = data
         return results
 
     def stop(self):
